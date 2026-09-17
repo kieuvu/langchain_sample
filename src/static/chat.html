@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>AI Assistant</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+
+<body>
+  <main class="chat-wrapper">
+    <!-- Minimalist Header -->
+    <header class="chat-header">
+      <div class="header-brand">
+        <h1 class="brand-title">AI Chatbot</h1>
+      </div>
+      <div class="header-status">
+        <span class="status-pill connecting" id="status-pill"></span>
+        <span id="status-text">Connecting...</span>
+      </div>
+    </header>
+
+    <!-- Message Stream -->
+    <section class="chat-messages" id="messages-container" aria-label="Conversation messages">
+      <div class="empty-state" id="empty-state">
+        <h2 class="empty-title">How can I help you today?</h2>
+
+        <div class="prompts-container" role="group" aria-label="Suggested questions">
+          <button class="prompt-btn" type="button" data-prompt="What's the weather in Hanoi today?">
+            Weather in Hanoi today
+          </button>
+          <button class="prompt-btn" type="button" data-prompt="What time is exactly right now?">
+            What time is exactly right now?
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Input Box -->
+    <footer class="chat-composer">
+      <form class="composer-box" id="chat-form">
+        <textarea class="user-input" id="user-input" rows="1" placeholder="Type a message..." disabled></textarea>
+        <button class="send-action" id="send-btn" type="submit" disabled aria-label="Send message">
+          <svg viewBox="0 0 24 24">
+            <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+          </svg>
+        </button>
+      </form>
+    </footer>
+  </main>
+
+  <script src="/static/app.js" defer></script>
+</body>
+
+</html>

@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "langchain-example"
+version = "0.1.0"
+description = "langchain-example"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115,<1",
+    "httpx>=0.28,<1",
+    "langchain>=1.4,<2",
+    "langchain-core>=1.6,<2",
+    "langchain-openai>=1.0,<2",
+    "langgraph>=1.2,<2",
+    "pydantic-settings>=2,<3",
+    "uvicorn>=0.30,<1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "ruff>=0.9,<1"]
+
+[project.scripts]
+chat-service = "cli:main"
+
+[tool.hatch.build.targets.wheel]
+only-include = [
+    "src/agent",
+    "src/config",
+    "src/exception",
+    "src/schemas",
+    "src/services",
+    "src/static",
+    "src/api.py",
+    "src/cli.py",
+]
+sources = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
