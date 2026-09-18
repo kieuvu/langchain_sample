@@ -7,7 +7,7 @@ from agent.chat.state import ChatState
 MAX_TOOL_CALL_TURNS = 10
 
 
-def route_chat_output(state: ChatState) -> Literal["call_tool", "finish"]:
+async def route_chat_output(state: ChatState) -> Literal["call_tool", "finish"]:
     messages = state.get("messages", [])
     if not messages:
         return "finish"
@@ -22,3 +22,9 @@ def route_chat_output(state: ChatState) -> Literal["call_tool", "finish"]:
         return "call_tool"
 
     return "finish"
+
+
+async def route_condition(
+    state: ChatState,
+) -> Literal["weather", "general"]:
+    return state["route"]

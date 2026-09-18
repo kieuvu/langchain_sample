@@ -8,7 +8,6 @@ from langgraph.checkpoint.memory import InMemorySaver
 
 from agent.chat.graph import build_graph
 from agent.chat.model import create_chat_model
-from agent.chat.tools import get_weather
 from exception.session_not_found import SessionNotFound
 
 
@@ -16,9 +15,11 @@ class ChatService:
     def __init__(self, model: Any = None, tools: list | None = None):
         if model is None:
             model = create_chat_model()
-        self.graph = build_graph(
-            model, [get_weather] if tools is None else tools, InMemorySaver()
-        )
+        if tools is None:
+            from agent.chat.tools.weather import get_weather
+
+            tools = [get_weather]
+        self.graph = build_graph(model, tools, InMemorySaver())
         self.sessions: dict[str, asyncio.Lock] = {}
 
     def create_session(self) -> str:
@@ -50,21 +51,35 @@ class ChatService:
             async for part in self.graph.astream(
                 {"messages": [HumanMessage(content=message)]},
                 self.config(session_id),
-                stream_mode=["messages", "updates"],
+                stream_mode=["messages", "updates", "tasks"],
                 version="v2",
             ):
-                if part["type"] == "messages":
-                    chunk, metadata = part["data"]
-                    if (
-                        isinstance(chunk, AIMessageChunk)
-                        and metadata.get("langgraph_node") == "chat"
+                if part["type"] == "tasks":
+                    task = part["data"]
+                    if "input" in task and task["name"] in (
+                        "router_agent",
+                        "weather_agent",
+                        "general_agent",
                     ):
-                        if chunk.content:
+                        yield "progress", {"step": task["name"]}
+                elif part["type"] == "messages":
+                    chunk, metadata = part["data"]
+                    node = metadata.get("langgraph_node")
+                    if isinstance(chunk, AIMessageChunk) and node in (
+                        "router_agent",
+                        "weather_agent",
+                        "general_agent",
+                    ):
+                        if node != "router_agent" and chunk.content:
                             yield "token", {"text": chunk.content}
                 elif part["type"] == "updates":
                     for node_name, update in part["data"].items():
+                        if not isinstance(update, dict):
+                            continue
                         for item in update.get("messages", []):
-                            if node_name == "chat" and isinstance(item, AIMessage):
+                            if node_name == "weather_agent" and isinstance(
+                                item, AIMessage
+                            ):
                                 for call in item.tool_calls:
                                     yield (
                                         "tool_start",
@@ -73,7 +88,9 @@ class ChatService:
                                             "input": call["args"],
                                         },
                                     )
-                            elif node_name == "tools" and isinstance(item, ToolMessage):
+                            elif node_name == "weather_tools" and isinstance(
+                                item, ToolMessage
+                            ):
                                 yield (
                                     "tool_end",
                                     {
@@ -81,5 +98,5 @@ class ChatService:
                                         "output": item.content,
                                     },
                                 )
-            state = self.graph.get_state(self.config(session_id))
+            state = await self.graph.aget_state(self.config(session_id))
             yield "done", {"answer": state.values["messages"][-1].content}

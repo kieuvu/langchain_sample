@@ -53,6 +53,27 @@ document.addEventListener("DOMContentLoaded", () => {
     return { bubble, bubbleContainer };
   }
 
+  function finishActiveBadge(bubbleContainer) {
+    const badge = bubbleContainer.querySelector(".tool-call-badge.active");
+    if (!badge) return;
+    badge.classList.remove("active");
+    badge.textContent = `✓ ${badge.dataset.completedLabel}`;
+  }
+
+  function showProgress(bubbleContainer, bubble, label, completedLabel, streamState) {
+    finishActiveBadge(bubbleContainer);
+    const badge = document.createElement("div");
+    badge.className = "tool-call-badge active";
+    badge.dataset.completedLabel = completedLabel;
+    const spinner = document.createElement("div");
+    spinner.className = "tool-spin";
+    badge.append(spinner, document.createTextNode(label));
+    bubbleContainer.insertBefore(badge, bubble);
+    if (!streamState.hasToken) bubble.textContent = label;
+    setStatus(label, "busy");
+    scrollToBottom();
+  }
+
   // Always create a fresh session for this page load (refresh = new session)
   async function initSession() {
     busy = true;
@@ -87,31 +108,32 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    if (event === "token") {
+    if (event === "progress") {
+      const steps = {
+        router_agent: ["Thinking: choosing how to help...", "Route chosen"],
+        weather_agent: ["Running: weather assistant...", "Weather assistant finished"],
+        general_agent: ["Running: assistant...", "Assistant finished"],
+      };
+      const step = steps[payload.step];
+      if (step) showProgress(bubbleContainer, bubble, step[0], step[1], streamState);
+    } else if (event === "token") {
       if (!streamState.hasToken) {
         bubble.textContent = "";
         streamState.hasToken = true;
+        bubble.dataset.hasToken = "true";
       }
       bubble.textContent += payload.text || "";
       scrollToBottom();
     } else if (event === "tool_start") {
       const tool = payload.name;
       const loc = payload.input?.location ? ` (${payload.input.location})` : "";
-      setStatus(`Checking ${tool}...`, "busy");
-
-      const badge = document.createElement("div");
-      badge.className = "tool-call-badge active";
-      badge.innerHTML = `<div class="tool-spin"></div> Running: ${tool}${loc}`;
-      bubbleContainer.insertBefore(badge, bubble);
-      scrollToBottom();
+      showProgress(bubbleContainer, bubble, `Running: ${tool}${loc}`, `Completed: ${tool}`, streamState);
     } else if (event === "tool_end") {
-      const badge = bubbleContainer.querySelector(".tool-call-badge.active");
-      if (badge) {
-        badge.className = "tool-call-badge";
-        badge.textContent = `✓ Completed: ${payload.name || "tool"}`;
-      }
+      finishActiveBadge(bubbleContainer);
+      if (!streamState.hasToken) bubble.textContent = "Generating reply...";
       setStatus("Generating reply...", "busy");
     } else if (event === "done") {
+      finishActiveBadge(bubbleContainer);
       bubble.textContent = payload.answer || "";
       streamState.done = true;
       setStatus("Ready", "ready");
@@ -171,9 +193,14 @@ document.addEventListener("DOMContentLoaded", () => {
       await streamReply(message, bubble, bubbleContainer);
       setStatus("Ready", "ready");
     } catch (err) {
-      bubble.textContent = bubble.textContent === "Thinking..."
-        ? err.message
-        : `${bubble.textContent}\n\n[Error: ${err.message}]`;
+      const activeBadge = bubbleContainer.querySelector(".tool-call-badge.active");
+      if (activeBadge) {
+        activeBadge.classList.remove("active");
+        activeBadge.textContent = "✕ Step failed";
+      }
+      bubble.textContent = bubble.dataset.hasToken
+        ? `${bubble.textContent}\n\n[Error: ${err.message}]`
+        : err.message;
       bubble.classList.add("error");
       setStatus("Error", "error");
     } finally {
@@ -201,4 +228,3 @@ document.addEventListener("DOMContentLoaded", () => {
 
   initSession();
 });
-

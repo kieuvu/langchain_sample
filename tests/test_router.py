@@ -1,3 +1,4 @@
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from agent.chat.router import MAX_TOOL_CALL_TURNS, route_chat_output
@@ -50,3 +51,55 @@ def test_route_chat_output_prevents_infinite_loops():
 def test_route_chat_output_empty_messages():
     state: ChatState = {"messages": []}
     assert route_chat_output(state) == "finish"
+
+
+@pytest.mark.anyio
+async def test_make_router_node_routes_with_structured_output():
+    from unittest.mock import AsyncMock
+
+    from agent.chat.graph import Route
+    from agent.chat.node import make_router_node
+
+    mock_model = AsyncMock()
+    mock_model.ainvoke.return_value = Route(route="weather")
+
+    router = make_router_node(mock_model)
+    command = await router({"messages": [HumanMessage(content="Weather in Danang?")]})
+    assert command.goto == "weather"
+
+    mock_model.ainvoke.return_value = Route(route="general")
+    command = await router({"messages": [HumanMessage(content="Hello")]})
+    assert command.goto == "general"
+
+
+@pytest.mark.anyio
+async def test_make_router_node_routes_with_dict():
+    from unittest.mock import AsyncMock
+
+    from agent.chat.node import make_router_node
+
+    mock_model = AsyncMock()
+    mock_model.ainvoke.return_value = {"route": "weather"}
+
+    router = make_router_node(mock_model)
+    command = await router({"messages": [HumanMessage(content="Weather?")]})
+    assert command.goto == "weather"
+
+
+@pytest.mark.anyio
+async def test_make_router_node_fallback_on_output_parser_exception():
+    from unittest.mock import AsyncMock
+
+    from langchain_core.exceptions import OutputParserException
+
+    from agent.chat.node import make_router_node
+
+    mock_model = AsyncMock()
+    mock_model.ainvoke.side_effect = OutputParserException("Failed")
+
+    router = make_router_node(mock_model)
+    command = await router({"messages": [HumanMessage(content="What's the weather?")]})
+    assert command.goto == "weather"
+
+    command = await router({"messages": [HumanMessage(content="Hi there!")]})
+    assert command.goto == "general"

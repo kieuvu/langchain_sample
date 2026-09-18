@@ -6,6 +6,7 @@ import pytest
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
+from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import tool
 
 from api import create_app
@@ -25,6 +26,19 @@ class FakeChatModel(BaseChatModel):
 
     def bind_tools(self, tools, **kwargs):
         return self
+
+    def with_structured_output(self, schema, **kwargs):
+        assert kwargs["method"] == "json_schema"
+        assert schema["properties"]["route"]
+
+        async def route(messages):
+            users = [
+                message for message in messages if isinstance(message, HumanMessage)
+            ]
+            choice = "weather" if "weather" in users[-1].content.lower() else "general"
+            return {"route": choice}
+
+        return RunnableLambda(route)
 
     @staticmethod
     def reply(messages):
@@ -72,11 +86,12 @@ class FakeChatModel(BaseChatModel):
 
 
 class FailingChatModel(FakeChatModel):
-    async def _agenerate(self):
+    async def _agenerate(self, messages, stop=None, run_manager=None, **kwargs):
         raise RuntimeError("fake model failed")
 
-    async def _astream(self):
+    async def _astream(self, messages, stop=None, run_manager=None, **kwargs):
         raise RuntimeError("fake model failed")
+        yield  # Keep this an async generator, as required by the chat model API.
 
 
 class SlowChatModel(FakeChatModel):
@@ -85,6 +100,20 @@ class SlowChatModel(FakeChatModel):
         return await super()._agenerate(
             messages, stop=stop, run_manager=run_manager, **kwargs
         )
+
+
+class ThinkingChatModel(FakeChatModel):
+    async def _astream(self, messages, stop=None, run_manager=None, **kwargs):
+        for text in ("Let me ", "check."):
+            yield ChatGenerationChunk(
+                message=AIMessageChunk(
+                    content="", additional_kwargs={"reasoning_content": text}
+                )
+            )
+        async for chunk in super()._astream(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        ):
+            yield chunk
 
 
 @pytest.fixture
@@ -163,12 +192,40 @@ async def test_stream_reports_tool_progress_tokens_and_final_answer(client):
     assert response.headers["content-type"].startswith("text/event-stream")
     events = parse_events(response.text)
     names = [name for name, _ in events]
-    assert names[0:2] == ["tool_start", "tool_end"]
+    assert names[:2] == ["progress", "progress"]
+    assert [data["step"] for name, data in events if name == "progress"] == [
+        "router_agent",
+        "weather_agent",
+        "weather_agent",
+    ]
+    assert names.index("tool_start") < names.index("tool_end") < names.index("token")
     assert names[-1] == "done"
     assert "token" in names
-    assert events[0][1] == {"name": "fake_weather", "input": {"location": "Hanoi"}}
-    assert events[1][1] == {"name": "fake_weather", "output": "Sunny in Hanoi"}
+    assert next(data for name, data in events if name == "tool_start") == {
+        "name": "fake_weather",
+        "input": {"location": "Hanoi"},
+    }
+    assert next(data for name, data in events if name == "tool_end") == {
+        "name": "fake_weather",
+        "output": "Sunny in Hanoi",
+    }
     assert events[-1][1] == {"answer": "Weather: sunny. "}
+
+
+@pytest.mark.anyio
+async def test_general_stream_shows_steps_and_tokens_without_tools(client):
+    session_id = await create_session(client)
+    response = await client.post(
+        f"/v1/sessions/{session_id}/messages/stream", json={"message": "Hello"}
+    )
+    events = parse_events(response.text)
+    assert [data["step"] for name, data in events if name == "progress"] == [
+        "router_agent",
+        "general_agent",
+    ]
+    assert "tool_start" not in [name for name, _ in events]
+    assert "token" in [name for name, _ in events]
+    assert events[-1] == ("done", {"answer": "Turn 1: Hello "})
 
 
 @pytest.mark.anyio
@@ -200,9 +257,12 @@ async def test_model_failure_returns_json_error_or_sse_error():
 
         response = await client.post(f"{url}/stream", json={"message": "Hello"})
         assert response.status_code == 200
-        assert parse_events(response.text) == [
-            ("error", {"message": "Could not process the message."})
-        ]
+        events = parse_events(response.text)
+        assert [name for name, _ in events] == ["progress", "progress", "error"]
+        assert events[-1] == (
+            "error",
+            {"message": "Could not process the message."},
+        )
 
 
 @pytest.mark.anyio
